@@ -1,0 +1,66 @@
+services:
+  n8n:
+    image: ${N8N_IMAGE}
+    restart: unless-stopped
+    environment:
+      TZ: ${TIMEZONE}
+      GENERIC_TIMEZONE: ${TIMEZONE}
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: ${PUBLIC_SCHEME}
+      N8N_EDITOR_BASE_URL: ${PUBLIC_SCHEME}://${N8N_HOST}/
+      N8N_WEBHOOK_URL: ${PUBLIC_SCHEME}://${N8N_HOST}/
+      N8N_PROXY_HOPS: "1"
+      N8N_SECURE_COOKIE: ${TLS_ENABLED}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_RESTRICT_FILE_ACCESS_TO: /files
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      NODE_ENV: production
+    volumes:
+      - ./n8n/data:/home/node/.n8n
+      - ./n8n/files:/files
+    expose:
+      - "5678"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5678/healthz/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - backend
+
+  nginx:
+    image: ${NGINX_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      n8n:
+        condition: service_healthy
+    environment:
+      N8N_HOST: ${N8N_HOST}
+      TLS_CERT_NAME: ${TLS_CERT_NAME}
+      NGINX_TLS_PREFIX: ${NGINX_TLS_PREFIX}
+      NGINX_HTTP_PREFIX: ${NGINX_HTTP_PREFIX}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/templates:ro
+      - ${TLS_VOLUME_SOURCE}:/etc/letsencrypt:ro
+    networks:
+      - backend
+
+  uptime-kuma:
+    image: ${KUMA_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${KUMA_PORT:-3001}:3001"
+    volumes:
+      - ./kuma/data:/app/data
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge

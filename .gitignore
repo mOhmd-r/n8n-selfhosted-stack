@@ -1,0 +1,34 @@
+# Local configuration and credentials
+/.env
+/.env.rsync
+/.env.ceph
+/.secrets/
+
+# Runtime state
+/n8n/data/*
+!/n8n/data/.gitkeep
+/n8n/files/*
+!/n8n/files/.gitkeep
+/kuma/data/*
+!/kuma/data/.gitkeep
+/backups/*
+!/backups/.gitkeep
+
+# Databases, archives, keys, and logs
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.pem
+*.key
+*.tar.gz
+*.tgz
+*.dump
+*.log
+logs/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~

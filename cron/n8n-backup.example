@@ -1,0 +1,13 @@
+# TEMPLATE ONLY. Copy and edit explicitly; this file activates nothing.
+# Replace /path/to/n8n-selfhosted-stack and choose the correct cron user.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Local verified backup, daily at 03:15.
+15 3 * * * operator cd /path/to/n8n-selfhosted-stack && flock -n /path/to/n8n-selfhosted-stack/backups/.backup.lock ./backup.sh >> /path/to/n8n-selfhosted-stack/backups/backup.log 2>&1
+
+# Optional rsync upload, disabled by default.
+# 45 3 * * * operator cd /path/to/n8n-selfhosted-stack && flock -n /path/to/n8n-selfhosted-stack/backups/.rsync.lock ./push-backup-rsync.sh latest >> /path/to/n8n-selfhosted-stack/backups/rsync.log 2>&1
+
+# Optional Ceph/S3 upload, disabled by default.
+# 0 4 * * * operator cd /path/to/n8n-selfhosted-stack && flock -n /path/to/n8n-selfhosted-stack/backups/.ceph.lock ./push-backup-ceph.sh latest >> /path/to/n8n-selfhosted-stack/backups/ceph.log 2>&1

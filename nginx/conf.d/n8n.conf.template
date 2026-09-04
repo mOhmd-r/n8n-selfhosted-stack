@@ -1,0 +1,68 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+# TLS mode: redirect cleartext requests to HTTPS.
+${NGINX_TLS_PREFIX}server {
+${NGINX_TLS_PREFIX}    listen 80;
+${NGINX_TLS_PREFIX}    listen [::]:80;
+${NGINX_TLS_PREFIX}    server_name ${N8N_HOST};
+${NGINX_TLS_PREFIX}    location / {
+${NGINX_TLS_PREFIX}        return 301 https://$host$request_uri;
+${NGINX_TLS_PREFIX}    }
+${NGINX_TLS_PREFIX}}
+
+${NGINX_TLS_PREFIX}server {
+${NGINX_TLS_PREFIX}    listen 443 ssl;
+${NGINX_TLS_PREFIX}    listen [::]:443 ssl;
+${NGINX_TLS_PREFIX}    server_name ${N8N_HOST};
+${NGINX_TLS_PREFIX}    ssl_certificate /etc/letsencrypt/live/${TLS_CERT_NAME}/fullchain.pem;
+${NGINX_TLS_PREFIX}    ssl_certificate_key /etc/letsencrypt/live/${TLS_CERT_NAME}/privkey.pem;
+${NGINX_TLS_PREFIX}    ssl_protocols TLSv1.2 TLSv1.3;
+${NGINX_TLS_PREFIX}    server_tokens off;
+${NGINX_TLS_PREFIX}    client_max_body_size 100m;
+${NGINX_TLS_PREFIX}    resolver 127.0.0.11 valid=10s ipv6=off;
+${NGINX_TLS_PREFIX}    location / {
+${NGINX_TLS_PREFIX}        set $n8n_upstream n8n:5678;
+${NGINX_TLS_PREFIX}        proxy_pass http://$n8n_upstream;
+${NGINX_TLS_PREFIX}        proxy_http_version 1.1;
+${NGINX_TLS_PREFIX}        proxy_set_header Host $host;
+${NGINX_TLS_PREFIX}        proxy_set_header X-Real-IP $remote_addr;
+${NGINX_TLS_PREFIX}        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+${NGINX_TLS_PREFIX}        proxy_set_header X-Forwarded-Proto https;
+${NGINX_TLS_PREFIX}        proxy_set_header X-Forwarded-Host $host;
+${NGINX_TLS_PREFIX}        proxy_set_header X-Forwarded-Port 443;
+${NGINX_TLS_PREFIX}        proxy_set_header Upgrade $http_upgrade;
+${NGINX_TLS_PREFIX}        proxy_set_header Connection $connection_upgrade;
+${NGINX_TLS_PREFIX}        proxy_read_timeout 3600s;
+${NGINX_TLS_PREFIX}        proxy_send_timeout 3600s;
+${NGINX_TLS_PREFIX}        proxy_buffering off;
+${NGINX_TLS_PREFIX}    }
+${NGINX_TLS_PREFIX}}
+
+# No-TLS mode: serve n8n over HTTP until the operator provisions a certificate.
+${NGINX_HTTP_PREFIX}server {
+${NGINX_HTTP_PREFIX}    listen 80;
+${NGINX_HTTP_PREFIX}    listen [::]:80;
+${NGINX_HTTP_PREFIX}    server_name ${N8N_HOST};
+${NGINX_HTTP_PREFIX}    server_tokens off;
+${NGINX_HTTP_PREFIX}    client_max_body_size 100m;
+${NGINX_HTTP_PREFIX}    resolver 127.0.0.11 valid=10s ipv6=off;
+${NGINX_HTTP_PREFIX}    location / {
+${NGINX_HTTP_PREFIX}        set $n8n_upstream n8n:5678;
+${NGINX_HTTP_PREFIX}        proxy_pass http://$n8n_upstream;
+${NGINX_HTTP_PREFIX}        proxy_http_version 1.1;
+${NGINX_HTTP_PREFIX}        proxy_set_header Host $host;
+${NGINX_HTTP_PREFIX}        proxy_set_header X-Real-IP $remote_addr;
+${NGINX_HTTP_PREFIX}        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+${NGINX_HTTP_PREFIX}        proxy_set_header X-Forwarded-Proto http;
+${NGINX_HTTP_PREFIX}        proxy_set_header X-Forwarded-Host $host;
+${NGINX_HTTP_PREFIX}        proxy_set_header X-Forwarded-Port 80;
+${NGINX_HTTP_PREFIX}        proxy_set_header Upgrade $http_upgrade;
+${NGINX_HTTP_PREFIX}        proxy_set_header Connection $connection_upgrade;
+${NGINX_HTTP_PREFIX}        proxy_read_timeout 3600s;
+${NGINX_HTTP_PREFIX}        proxy_send_timeout 3600s;
+${NGINX_HTTP_PREFIX}        proxy_buffering off;
+${NGINX_HTTP_PREFIX}    }
+${NGINX_HTTP_PREFIX}}
