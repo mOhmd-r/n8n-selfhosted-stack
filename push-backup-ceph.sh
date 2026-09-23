@@ -17,8 +17,10 @@ done
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env.ceph ]] || fail ".env.ceph is missing. Configure Ceph/S3 through install.sh."
 # shellcheck source=/dev/null
+set -a
 # shellcheck disable=SC1091
-set -a; source .env.ceph; set +a
+source .env.ceph
+set +a
 
 for variable in CEPH_S3_ENDPOINT CEPH_S3_BUCKET CEPH_S3_PREFIX AWS_DEFAULT_REGION AWS_PROFILE AWS_SHARED_CREDENTIALS_FILE AWS_CLI_IMAGE; do
     [[ -n "${!variable:-}" ]] || fail "Missing Ceph/S3 setting: ${variable}"

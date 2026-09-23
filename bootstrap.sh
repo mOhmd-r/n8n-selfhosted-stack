@@ -23,8 +23,10 @@ validate_pinned_image() {
 
 [[ -f .env ]] || fail ".env is missing. Run ./install.sh, or copy .env.example to .env and review it."
 # shellcheck source=/dev/null
+set -a
 # shellcheck disable=SC1091
-set -a; source .env; set +a
+source .env
+set +a
 
 required=(N8N_HOST TIMEZONE N8N_IMAGE KUMA_IMAGE NGINX_IMAGE KUMA_PORT TLS_ENABLED LETSENCRYPT_PATH TLS_CERT_NAME TLS_VOLUME_SOURCE PUBLIC_SCHEME NGINX_TLS_PREFIX NGINX_HTTP_PREFIX BACKUP_RETENTION_DAYS)
 for variable in "${required[@]}"; do

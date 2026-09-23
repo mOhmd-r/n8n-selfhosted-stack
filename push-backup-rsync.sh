@@ -16,8 +16,10 @@ for command_name in ssh ssh-keygen rsync sha256sum realpath stat; do
 done
 [[ -f .env.rsync ]] || fail ".env.rsync is missing. Configure rsync through install.sh."
 # shellcheck source=/dev/null
+set -a
 # shellcheck disable=SC1091
-set -a; source .env.rsync; set +a
+source .env.rsync
+set +a
 
 for variable in RSYNC_HOST RSYNC_PORT RSYNC_USER RSYNC_PATH RSYNC_SSH_KEY RSYNC_KNOWN_HOSTS_FILE; do
     [[ -n "${!variable:-}" ]] || fail "Missing rsync setting: ${variable}"

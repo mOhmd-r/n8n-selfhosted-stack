@@ -83,8 +83,10 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is unavailable."
 [[ -f .env ]] || fail ".env is missing. Configure the target stack before restoring."
 # shellcheck source=/dev/null
+set -a
 # shellcheck disable=SC1091
-set -a; source .env; set +a
+source .env
+set +a
 [[ -n "${N8N_IMAGE:-}" && -n "${KUMA_IMAGE:-}" ]] || fail ".env lacks N8N_IMAGE or KUMA_IMAGE."
 
 backup_dir="$(realpath -e "$backup_arg")" || fail "Backup directory does not exist: ${backup_arg}"
