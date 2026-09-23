@@ -14,6 +14,16 @@ pass() { line "$1" "OK${2:+ - $2}"; }
 warn() { line "$1" "WARN${2:+ - $2}"; warnings=$((warnings + 1)); }
 fail() { line "$1" "FAIL${2:+ - $2}"; failures=$((failures + 1)); }
 
+validate_pinned_image() {
+    local image="$1" tag
+
+    [[ "$image" =~ ^[A-Za-z0-9._/:@-]+$ ]] || return 1
+    [[ "$image" =~ @sha256:[A-Fa-f0-9]{64}$ ]] && return 0
+    tag="${image##*:}"
+    [[ "$tag" != "$image" && "$tag" != *"/"* ]] || return 1
+    [[ "$tag" =~ [0-9]+\.[0-9]+ && "$tag" != "latest" ]]
+}
+
 if command -v docker >/dev/null 2>&1; then
     pass "Docker Engine"
 else
@@ -42,6 +52,12 @@ if [[ -f .env ]]; then
     if set -a && source .env && set +a; then
         env_ok=true
         pass ".env"
+        env_mode="$(stat -c %a .env 2>/dev/null || printf 'unknown')"
+        if [[ "$env_mode" =~ ^[0-7]{3,4}$ ]] && (( (8#$env_mode & 077) == 0 )); then
+            pass ".env permissions" "$env_mode"
+        else
+            fail ".env permissions" "expected no group/other access; got ${env_mode}"
+        fi
     else
         set +a
         fail ".env" "could not be parsed"
@@ -60,6 +76,14 @@ if [[ "$env_ok" == "true" ]]; then
     else
         fail "Required variables" "missing: ${missing[*]}"
     fi
+
+    for image_variable in N8N_IMAGE KUMA_IMAGE NGINX_IMAGE; do
+        if [[ -n "${!image_variable:-}" ]] && validate_pinned_image "${!image_variable}"; then
+            pass "$image_variable" "${!image_variable}"
+        else
+            fail "$image_variable" "use an explicit version tag or sha256 digest"
+        fi
+    done
 fi
 
 if [[ "$compose_ok" == "true" && "$env_ok" == "true" ]]; then

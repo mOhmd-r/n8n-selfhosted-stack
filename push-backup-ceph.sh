@@ -17,12 +17,15 @@ done
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env.ceph ]] || fail ".env.ceph is missing. Configure Ceph/S3 through install.sh."
 # shellcheck source=/dev/null
-set -a; source .env.ceph; set +a
+set -a
+# shellcheck disable=SC1091
+source .env.ceph
+set +a
 
 for variable in CEPH_S3_ENDPOINT CEPH_S3_BUCKET CEPH_S3_PREFIX AWS_DEFAULT_REGION AWS_PROFILE AWS_SHARED_CREDENTIALS_FILE AWS_CLI_IMAGE; do
     [[ -n "${!variable:-}" ]] || fail "Missing Ceph/S3 setting: ${variable}"
 done
-[[ "$CEPH_S3_ENDPOINT" =~ ^https?://[^[:space:]]+$ ]] || fail "CEPH_S3_ENDPOINT is invalid."
+[[ "$CEPH_S3_ENDPOINT" =~ ^https://[^[:space:]]+$ ]] || fail "CEPH_S3_ENDPOINT must use HTTPS."
 [[ "$CEPH_S3_BUCKET" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{1,61}[A-Za-z0-9]$ ]] || fail "CEPH_S3_BUCKET is invalid."
 [[ "$CEPH_S3_PREFIX" =~ ^[A-Za-z0-9._/-]+$ && "$CEPH_S3_PREFIX" != /* && "$CEPH_S3_PREFIX" != *..* ]] || fail "CEPH_S3_PREFIX is unsafe."
 [[ "$AWS_CLI_IMAGE" =~ ^[A-Za-z0-9._/:@-]+$ ]] || fail "AWS_CLI_IMAGE is invalid."

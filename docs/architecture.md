@@ -51,8 +51,8 @@ Both n8n and Kuma use SQLite in this design. Their data directories require loca
 
 ```text
 installer/core.sh   hostname, timezone, images, retention, .env
-installer/tls.sh    provider choice, helper delegation, certificate checks
-installer/rsync.sh  SSH target and non-destructive connectivity test
+installer/tls.sh    existing-certificate choice and certificate checks
+installer/rsync.sh  pinned SSH host/key and connectivity test
 installer/ceph.sh   S3 target, protected credentials, bucket test
 installer/cron.sh   explicit schedules and flock-protected cron installation
 ```
@@ -61,7 +61,7 @@ The installer checks prerequisites but never installs packages. It gathers choic
 
 `bootstrap.sh` is non-interactive. It validates `.env`, Docker and Compose, renders the Compose model, checks TLS files when enabled, creates relative directories, pulls images, derives ownership, starts services, waits for `/healthz/readiness`, tests the rendered Nginx configuration, and prints status.
 
-Certificate API behavior is not implemented here. ArvanCloud and Cloudflare choices clone the designated helper repository into a temporary directory and preserve its interactive secret prompt. Existing-certificate mode consumes a caller-selected Certbot root. Nginx mounts certificate material read-only.
+Certificate API behavior is not implemented here, and the installer never downloads or executes an issuance helper. Existing-certificate mode consumes a caller-selected Certbot root, confines resolved certificate paths to its selected `live/` or `archive/` tree, validates certificate/key structure and matching public keys, and mounts the material read-only in Nginx.
 
 ## BACKUP
 
@@ -97,14 +97,14 @@ create VERIFIED -> atomic rename to timestamped directory
 
 Stopping writers makes the archive consistent without coupling the project to online SQLite backup details or Kuma's private schema. The tradeoff is short downtime. The n8n table names are checked because workflow and credential readability are explicit recovery requirements; Kuma validation deliberately uses only SQLite integrity and no private table names.
 
-The manifest records source host/time, configured n8n and Kuma images, locally available image IDs/digests, integrity results, and workflow/credential counts. The default moving tags (`n8n:latest` and `uptime-kuma:2`) make the resolved image ID/digest especially important; a digest may still be unavailable when Docker has no repository digest for the selected image.
+The manifest records source host/time, configured n8n and Kuma images, locally available image IDs/digests, integrity results, and workflow/credential counts. Explicit release tags are required by default, while recorded image IDs/digests provide stronger evidence of the exact local artifact; a digest may still be unavailable when Docker has no repository digest for the selected image.
 
 ## Off-site boundary
 
 Local backups share the production disk's failure domain. Two optional uploaders move only verified backup sets:
 
-- rsync transfers into a unique remote partial directory, validates hashes on the remote host, and renames the directory atomically. It does not merge with an existing target, use `--delete`, or enforce remote retention.
-- Ceph/S3 uses a pinned official AWS CLI container and a read-only mounted AWS-compatible credentials file. Archive, manifest, and hashes upload first; `VERIFIED` uploads last. It never deletes objects or buckets.
+- rsync requires an operator-pinned host key, disables password/interactive authentication and forwarding, transfers into a unique remote partial directory, validates hashes on the remote host, and renames the directory atomically. It does not merge with an existing target, use `--delete`, or enforce remote retention.
+- Ceph/S3 requires HTTPS and uses a pinned official AWS CLI container plus a read-only mounted credentials file. Archive, manifest, and hashes upload first; `VERIFIED` uploads last. It never deletes objects or buckets.
 
 Remote lifecycle, immutability, encryption, replication, capacity, and credential rotation belong to the remote system. Operators must monitor and test that boundary.
 
@@ -112,7 +112,7 @@ Remote lifecycle, immutability, encryption, replication, capacity, and credentia
 
 Both restore modes accept only a verified backup, allowlist checksum paths, reject unsafe or unexpected tar members, extract into a temporary directory, verify SQLite, and compare counts and integrity results with the manifest. A plan and explicit confirmation precede target changes.
 
-After confirmation, affected services stop and a checksummed `pre-restore-*` safety archive captures current n8n and Kuma state before files are replaced. The safety copy remains until an operator deliberately removes it.
+Before services stop, verified content is copied into adjacent, same-filesystem staging directories. After confirmation, affected services stop and a checksummed `pre-restore-*` safety archive captures current state. Complete directory trees are then swapped by atomic rename. If ownership, startup, or readiness fails, the restored services stop, the former trees are renamed back, and the prior service state is attempted. The safety copy remains until an operator deliberately removes it.
 
 ### Production / DR
 

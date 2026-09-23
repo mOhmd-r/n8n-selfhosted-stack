@@ -13,7 +13,7 @@ ceph_prompt() {
     read -r -s -p "Secret key: " AWS_SECRET_ACCESS_KEY
     printf '\n'
 
-    [[ "$CEPH_S3_ENDPOINT" =~ ^https?://[^[:space:]]+$ ]] || fail "Endpoint must be an HTTP(S) URL."
+    [[ "$CEPH_S3_ENDPOINT" =~ ^https://[^[:space:]]+$ ]] || fail "Endpoint must use HTTPS."
     [[ "$CEPH_S3_BUCKET" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{1,61}[A-Za-z0-9]$ ]] || fail "Bucket name is invalid."
     [[ "$CEPH_S3_PREFIX" =~ ^[A-Za-z0-9._/-]+$ && "$CEPH_S3_PREFIX" != /* && "$CEPH_S3_PREFIX" != *..* ]] \
         || fail "Prefix must be a relative object prefix without spaces or '..'."

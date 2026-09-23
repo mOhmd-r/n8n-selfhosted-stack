@@ -11,9 +11,22 @@ log() { printf '[INFO] %s\n' "$*"; }
 ok() { printf '[OK] %s\n' "$*"; }
 fail() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
+validate_pinned_image() {
+    local image="$1" tag
+
+    [[ "$image" =~ ^[A-Za-z0-9._/:@-]+$ ]] || return 1
+    [[ "$image" =~ @sha256:[A-Fa-f0-9]{64}$ ]] && return 0
+    tag="${image##*:}"
+    [[ "$tag" != "$image" && "$tag" != *"/"* ]] || return 1
+    [[ "$tag" =~ [0-9]+\.[0-9]+ && "$tag" != "latest" ]]
+}
+
 [[ -f .env ]] || fail ".env is missing. Run ./install.sh, or copy .env.example to .env and review it."
 # shellcheck source=/dev/null
-set -a; source .env; set +a
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
 
 required=(N8N_HOST TIMEZONE N8N_IMAGE KUMA_IMAGE NGINX_IMAGE KUMA_PORT TLS_ENABLED LETSENCRYPT_PATH TLS_CERT_NAME TLS_VOLUME_SOURCE PUBLIC_SCHEME NGINX_TLS_PREFIX NGINX_HTTP_PREFIX BACKUP_RETENTION_DAYS)
 for variable in "${required[@]}"; do
@@ -21,7 +34,13 @@ for variable in "${required[@]}"; do
 done
 [[ "$TLS_ENABLED" == "true" || "$TLS_ENABLED" == "false" ]] || fail "TLS_ENABLED must be true or false."
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "BACKUP_RETENTION_DAYS must be a non-negative integer."
-[[ "$KUMA_PORT" =~ ^[0-9]+$ ]] && (( KUMA_PORT >= 1 && KUMA_PORT <= 65535 )) || fail "KUMA_PORT is invalid."
+if [[ ! "$KUMA_PORT" =~ ^[0-9]+$ ]] || (( KUMA_PORT < 1 || KUMA_PORT > 65535 )); then
+    fail "KUMA_PORT is invalid."
+fi
+for image_variable in N8N_IMAGE KUMA_IMAGE NGINX_IMAGE; do
+    validate_pinned_image "${!image_variable}" ||
+        fail "${image_variable} must use an explicit version tag or sha256 digest; moving tags are rejected."
+done
 if [[ "$TLS_ENABLED" == "true" ]]; then
     [[ "$PUBLIC_SCHEME" == "https" && -z "$NGINX_TLS_PREFIX" && "$NGINX_HTTP_PREFIX" == "#" ]] \
         || fail "TLS-related .env selectors are inconsistent. Re-run install.sh or compare .env.example."
@@ -31,6 +50,7 @@ else
 fi
 
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Install it explicitly, then retry."
+command -v realpath >/dev/null 2>&1 || fail "realpath is required. Install it explicitly, then retry."
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable by this user."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is not available."
 ok "Docker Engine and Compose are available."
@@ -42,12 +62,25 @@ ok "Compose configuration is valid."
 if [[ "$TLS_ENABLED" == "true" ]]; then
     CERT_DIR="${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}"
     can_read_file() {
-        local path="$1"
+        local path="$1" resolved root
+        if [[ -r "$path" ]]; then
+            resolved="$(realpath -e "$path")" || return 1
+            root="$(realpath -e "$LETSENCRYPT_PATH")" || return 1
+        elif command -v sudo >/dev/null 2>&1; then
+            resolved="$(sudo -n realpath -e "$path")" || return 1
+            root="$(sudo -n realpath -e "$LETSENCRYPT_PATH")" || return 1
+        else
+            return 1
+        fi
+        case "$resolved" in
+            "${root}/live/${TLS_CERT_NAME}/"*|"${root}/archive/${TLS_CERT_NAME}/"*) ;;
+            *) return 1 ;;
+        esac
         [[ -f "$path" && -r "$path" ]] && return 0
         command -v sudo >/dev/null 2>&1 && sudo -n test -f "$path" && sudo -n test -r "$path"
     }
-    can_read_file "${CERT_DIR}/fullchain.pem" || fail "TLS certificate is not readable: ${CERT_DIR}/fullchain.pem"
-    can_read_file "${CERT_DIR}/privkey.pem" || fail "TLS private key is not readable: ${CERT_DIR}/privkey.pem"
+    can_read_file "${CERT_DIR}/fullchain.pem" || fail "TLS certificate is unreadable or resolves outside the selected Certbot tree: ${CERT_DIR}/fullchain.pem"
+    can_read_file "${CERT_DIR}/privkey.pem" || fail "TLS private key is unreadable or resolves outside the selected Certbot tree: ${CERT_DIR}/privkey.pem"
     ok "TLS certificate files are readable."
 else
     log "TLS is disabled; Nginx will serve plain HTTP."

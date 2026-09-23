@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-ARVAN_CERTBOT_URL="https://github.com/mOhmd-r/ArvanCloud-Certbot.git"
-CLOUDFLARE_CERTBOT_URL="https://github.com/mOhmd-r/Cloudflare-Certbot.git"
+# This file is sourced by install.sh; these assignments are consumed there.
+# shellcheck disable=SC2034
 
 validate_cert_name() {
-    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$1" != *..* ]]
 }
 
 tls_prompt() {
@@ -12,22 +12,21 @@ tls_prompt() {
 
     cat <<'EOF'
 
-TLS provider:
-  1) ArvanCloud
-  2) Cloudflare
-  3) Existing certificate
-  4) Skip TLS setup for now
+TLS mode:
+  1) Use an existing certificate
+  2) Skip TLS setup for now
+
+Certificate issuance is intentionally outside this repository. Provision and
+test the certificate first, then select option 1.
 EOF
 
     while :; do
-        read -r -p "Selection [3]: " choice
-        choice="${choice:-3}"
+        read -r -p "Selection [1]: " choice
+        choice="${choice:-1}"
         case "$choice" in
-            1) TLS_PROVIDER="arvancloud"; break ;;
-            2) TLS_PROVIDER="cloudflare"; break ;;
-            3) TLS_PROVIDER="existing"; break ;;
-            4) TLS_PROVIDER="skip"; break ;;
-            *) warn "Choose 1, 2, 3, or 4." ;;
+            1) TLS_PROVIDER="existing"; break ;;
+            2) TLS_PROVIDER="skip"; break ;;
+            *) warn "Choose 1 or 2." ;;
         esac
     done
 
@@ -37,119 +36,103 @@ EOF
             warn "Use an absolute Certbot root path without spaces or '..'."
             LETSENCRYPT_PATH="$(prompt_with_default "Certbot root path" "/etc/letsencrypt")"
         done
+        [[ -d "$LETSENCRYPT_PATH" && ! -L "$LETSENCRYPT_PATH" ]] ||
+            fail "Certbot root must be an existing, non-symlink directory."
+
         TLS_CERT_NAME="$(prompt_with_default "Certificate name under live/" "$N8N_HOST")"
         while ! validate_cert_name "$TLS_CERT_NAME"; do
             warn "Certificate name may contain letters, digits, dots, underscores, and hyphens."
             TLS_CERT_NAME="$(prompt_with_default "Certificate name under live/" "$N8N_HOST")"
         done
-    else
-        LETSENCRYPT_PATH="/etc/letsencrypt"
-        TLS_CERT_NAME="$N8N_HOST"
-    fi
 
-    if [[ "$TLS_PROVIDER" == "arvancloud" ]]; then
-        for command_name in git curl jq dig certbot; do
-            command -v "$command_name" >/dev/null 2>&1 \
-                || fail "ArvanCloud helper prerequisite is missing: ${command_name}"
-        done
-    elif [[ "$TLS_PROVIDER" == "cloudflare" ]]; then
-        for command_name in git sudo apt python3 stty; do
-            command -v "$command_name" >/dev/null 2>&1 \
-                || fail "Cloudflare helper prerequisite is missing: ${command_name}"
-        done
-    fi
-
-    if [[ "$TLS_PROVIDER" == "skip" ]]; then
-        TLS_ENABLED="false"
-        TLS_VOLUME_SOURCE="./nginx"
-        PUBLIC_SCHEME="http"
-        NGINX_TLS_PREFIX="#"
-        NGINX_HTTP_PREFIX=""
-    else
         TLS_ENABLED="true"
         TLS_VOLUME_SOURCE="$LETSENCRYPT_PATH"
         PUBLIC_SCHEME="https"
         NGINX_TLS_PREFIX=""
         NGINX_HTTP_PREFIX="#"
+    else
+        LETSENCRYPT_PATH="/etc/letsencrypt"
+        TLS_CERT_NAME="$N8N_HOST"
+        TLS_ENABLED="false"
+        TLS_VOLUME_SOURCE="./nginx"
+        PUBLIC_SCHEME="http"
+        NGINX_TLS_PREFIX="#"
+        NGINX_HTTP_PREFIX=""
     fi
 }
 
-tls_validate_certificate() {
-    local cert_dir="${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}"
-    can_read_file "${cert_dir}/fullchain.pem" || fail "Certificate not readable: ${cert_dir}/fullchain.pem"
-    can_read_file "${cert_dir}/privkey.pem" || fail "Private key not readable: ${cert_dir}/privkey.pem"
-    ok "Certificate files are readable."
+cert_path_is_safe() {
+    local path="$1" resolved root
+
+    if [[ -r "$path" ]]; then
+        resolved="$(realpath -e "$path")" || return 1
+        root="$(realpath -e "$LETSENCRYPT_PATH")" || return 1
+    elif command -v sudo >/dev/null 2>&1; then
+        resolved="$(sudo -n realpath -e "$path")" || return 1
+        root="$(sudo -n realpath -e "$LETSENCRYPT_PATH")" || return 1
+    else
+        return 1
+    fi
+
+    case "$resolved" in
+        "${root}/live/${TLS_CERT_NAME}/"*|"${root}/archive/${TLS_CERT_NAME}/"*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 can_read_file() {
     local path="$1"
+    cert_path_is_safe "$path" || return 1
     [[ -f "$path" && -r "$path" ]] && return 0
-    command -v sudo >/dev/null 2>&1 && sudo -n test -f "$path" && sudo -n test -r "$path"
+    command -v sudo >/dev/null 2>&1 &&
+        sudo -n test -f "$path" &&
+        sudo -n test -r "$path"
 }
 
-tls_run_helper() {
-    local provider="$1" helper_url helper_script helper_dir rc=0
+tls_validate_certificate() {
+    local cert_dir="${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}"
+    local cert_pubkey key_pubkey
     local -a privilege=()
+    can_read_file "${cert_dir}/fullchain.pem" ||
+        fail "Certificate is missing, unreadable, or resolves outside the selected Certbot tree: ${cert_dir}/fullchain.pem"
+    can_read_file "${cert_dir}/privkey.pem" ||
+        fail "Private key is missing, unreadable, or resolves outside the selected Certbot tree: ${cert_dir}/privkey.pem"
 
-    command -v git >/dev/null 2>&1 || fail "git is required for delegated certificate setup."
-    helper_dir="$(mktemp -d)"
-    if [[ $(id -u) -ne 0 ]]; then
-        command -v sudo >/dev/null 2>&1 || fail "The certificate helper requires root access; sudo is unavailable."
-        privilege=(sudo)
+    if command -v openssl >/dev/null 2>&1; then
+        [[ -r "${cert_dir}/privkey.pem" ]] || privilege=(sudo -n)
+        "${privilege[@]}" openssl x509 -checkend 0 -noout -in "${cert_dir}/fullchain.pem" >/dev/null 2>&1 ||
+            fail "Certificate is expired or invalid: ${cert_dir}/fullchain.pem"
+        "${privilege[@]}" openssl pkey -in "${cert_dir}/privkey.pem" -noout -check >/dev/null 2>&1 ||
+            fail "Private key is invalid: ${cert_dir}/privkey.pem"
+        cert_pubkey="$("${privilege[@]}" openssl x509 -in "${cert_dir}/fullchain.pem" -pubkey -noout |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            sha256sum)"
+        key_pubkey="$("${privilege[@]}" openssl pkey -in "${cert_dir}/privkey.pem" -pubout -outform DER 2>/dev/null |
+            sha256sum)"
+        [[ "${cert_pubkey%% *}" == "${key_pubkey%% *}" ]] ||
+            fail "Certificate and private key do not match."
+    else
+        warn "openssl is unavailable; certificate/key validity and matching were not checked."
     fi
-
-    case "$provider" in
-        arvancloud)
-            helper_url="$ARVAN_CERTBOT_URL"
-            helper_script="certbot-arvan.sh"
-            ;;
-        cloudflare)
-            helper_url="$CLOUDFLARE_CERTBOT_URL"
-            helper_script="certbot-cloudflare.sh"
-            ;;
-        *) fail "Unknown TLS helper: $provider" ;;
-    esac
-
-    log "Cloning the selected certificate helper into a temporary directory."
-    git clone --depth 1 "$helper_url" "${helper_dir}/helper" || rc=$?
-    if (( rc == 0 )); then
-        chmod +x "${helper_dir}/helper/${helper_script}"
-        if [[ "$provider" == "arvancloud" ]]; then
-            (cd "${helper_dir}/helper" && "${privilege[@]}" "./${helper_script}" "$N8N_HOST") || rc=$?
-        else
-            log "The Cloudflare helper will ask for the domain again; input is hidden to protect its token prompt."
-            (
-                trap 'stty echo' EXIT
-                trap 'exit 130' INT
-                trap 'exit 143' TERM
-                stty -echo
-                cd "${helper_dir}/helper"
-                "${privilege[@]}" "./${helper_script}"
-            ) || rc=$?
-            printf '\n'
-        fi
-    fi
-
-    if ! rm -rf -- "$helper_dir" 2>/dev/null; then
-        "${privilege[@]}" rm -rf -- "$helper_dir"
-    fi
-    (( rc == 0 )) || fail "External certificate helper failed with status ${rc}."
+    ok "Existing certificate material passed validation."
 }
 
 tls_configure() {
     case "$TLS_PROVIDER" in
-        arvancloud|cloudflare) tls_run_helper "$TLS_PROVIDER" ;;
         existing)
-            log "Using existing certificate material."
+            log "Using pre-provisioned certificate material."
             if [[ $(id -u) -ne 0 && ! -r "${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}/privkey.pem" ]]; then
-                command -v sudo >/dev/null 2>&1 || fail "Certificate validation requires root access and sudo is unavailable."
+                command -v sudo >/dev/null 2>&1 ||
+                    fail "Certificate validation requires root access and sudo is unavailable."
                 sudo -v
             fi
+            tls_validate_certificate
             ;;
         skip)
             warn "TLS is disabled. Nginx will serve HTTP until .env is updated with valid certificate settings."
-            return 0
+            ;;
+        *)
+            fail "Unknown TLS provider state: ${TLS_PROVIDER:-unset}"
             ;;
     esac
-    tls_validate_certificate
 }
