@@ -2,6 +2,9 @@ services:
   n8n:
     image: ${N8N_IMAGE}
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
     environment:
       TZ: ${TIMEZONE}
       GENERIC_TIMEZONE: ${TIMEZONE}
@@ -30,10 +33,18 @@ services:
       start_period: 60s
     networks:
       - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: ${NGINX_IMAGE}
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       n8n:
         condition: service_healthy
@@ -50,16 +61,29 @@ services:
       - ${TLS_VOLUME_SOURCE}:/etc/letsencrypt:ro
     networks:
       - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   uptime-kuma:
     image: ${KUMA_IMAGE}
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${KUMA_PORT:-3001}:3001"
     volumes:
       - ./kuma/data:/app/data
     networks:
       - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   backend:

@@ -114,12 +114,46 @@ restore_tmp="$(mktemp -d)"
 restore_complete=false
 stopped_services=()
 safety_dir=""
+stage_dirs=()
+swapped_targets=()
+swapped_old_dirs=()
+
+safe_remove_restore_tree() {
+    local path="$1"
+    case "$path" in
+        "${PROJECT_DIR}/n8n/.data.restore-stage."*|"${PROJECT_DIR}/n8n/.files.restore-stage."*|\
+        "${PROJECT_DIR}/kuma/.data.restore-stage."*|"${PROJECT_DIR}/n8n/.data.pre-restore."*|\
+        "${PROJECT_DIR}/n8n/.files.pre-restore."*|"${PROJECT_DIR}/kuma/.data.pre-restore."*)
+            rm -rf -- "$path"
+            ;;
+        *) warn "Refusing to remove unexpected restore path: ${path}"; return 1 ;;
+    esac
+}
 
 cleanup() {
-    local status=$?
+    local status=$? index target old_dir stage
     rm -rf -- "$restore_tmp"
+    if [[ "$restore_complete" != "true" && ${#swapped_targets[@]} -gt 0 ]]; then
+        warn "Restore failed after state was swapped; rolling back the previous trees."
+        docker compose -f "$COMPOSE_FILE" stop n8n uptime-kuma >/dev/null 2>&1 || true
+        for (( index=${#swapped_targets[@]}-1; index>=0; index-- )); do
+            target="${swapped_targets[$index]}"
+            old_dir="${swapped_old_dirs[$index]}"
+            if [[ -d "$old_dir" && ! -L "$old_dir" ]]; then
+                case "$target" in
+                    "${PROJECT_DIR}/n8n/data"|"${PROJECT_DIR}/n8n/files"|"${PROJECT_DIR}/kuma/data")
+                        rm -rf -- "$target"
+                        mv -- "$old_dir" "$target" || warn "Rollback failed for ${target}. Safety copy: ${safety_dir}"
+                        ;;
+                esac
+            fi
+        done
+    fi
+    for stage in "${stage_dirs[@]}"; do
+        [[ -e "$stage" ]] && safe_remove_restore_tree "$stage" || true
+    done
     if [[ "$restore_complete" != "true" && ${#stopped_services[@]} -gt 0 ]]; then
-        warn "Restore failed after services were stopped; attempting to return their prior running state."
+        warn "Attempting to return services to their prior running state."
         docker compose -f "$COMPOSE_FILE" start "${stopped_services[@]}" >/dev/null 2>&1 || \
             warn "Automatic service restart failed. Use the safety copy and inspect the stack manually."
     fi
@@ -149,7 +183,18 @@ log "Extracting the verified archive into a temporary workspace."
 tar -xzf "$archive" -C "$restore_tmp"
 n8n_db="${restore_tmp}/n8n/data/database.sqlite"
 kuma_db="${restore_tmp}/kuma/data/kuma.db"
-[[ -f "$n8n_db" ]] || fail "Backup has no n8n database.sqlite."
+
+unexpected_node="$(find "${restore_tmp}/n8n" "${restore_tmp}/kuma" ! -type f ! -type d ! -type l -print -quit)"
+[[ -z "$unexpected_node" ]] || fail "Backup contains an unsupported filesystem object: ${unexpected_node#${restore_tmp}/}"
+while IFS= read -r link; do
+    resolved_link="$(realpath -m "$link")"
+    case "$resolved_link" in
+        "${restore_tmp}/"*) ;;
+        *) fail "Backup contains a symlink escaping the staging area: ${link#${restore_tmp}/}" ;;
+    esac
+done < <(find "${restore_tmp}/n8n" "${restore_tmp}/kuma" -type l -print)
+[[ -f "$n8n_db" && ! -L "$n8n_db" ]] || fail "Backup has no regular n8n database.sqlite."
+[[ ! -e "$kuma_db" || ( -f "$kuma_db" && ! -L "$kuma_db" ) ]] || fail "Kuma database is not a regular file."
 
 verify_n8n() {
     local database="$1"
@@ -233,6 +278,23 @@ if [[ "$assume_yes" != "true" ]]; then
 fi
 
 mkdir -p n8n/data n8n/files kuma/data backups
+
+prepare_stage() {
+    local source="$1" target="$2" parent base stage
+    parent="$(dirname "$target")"
+    base="$(basename "$target")"
+    stage="$(mktemp -d "${parent}/.${base}.restore-stage.XXXXXX")"
+    stage_dirs+=("$stage")
+    cp -a "${source}/." "$stage/"
+}
+
+log "Copying verified state into same-filesystem staging directories."
+prepare_stage "${restore_tmp}/n8n/data" "${PROJECT_DIR}/n8n/data"
+prepare_stage "${restore_tmp}/n8n/files" "${PROJECT_DIR}/n8n/files"
+if [[ "$with_kuma" == "true" ]]; then
+    prepare_stage "${restore_tmp}/kuma/data" "${PROJECT_DIR}/kuma/data"
+fi
+
 service_is_running() {
     local service="$1" container_id
     container_id="$(docker compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null || true)"
@@ -260,23 +322,29 @@ tar -czf "${safety_dir}/current-state.tar.gz" -C "$PROJECT_DIR" n8n/data n8n/fil
     touch SAFETY_COPY
 )
 
-replace_tree() {
-    local source="$1" target="$2"
+swap_tree() {
+    local stage="$1" target="$2" parent base old_dir
     case "$target" in
         "${PROJECT_DIR}/n8n/data"|"${PROJECT_DIR}/n8n/files"|"${PROJECT_DIR}/kuma/data") ;;
         *) fail "Refusing to replace unexpected target: ${target}" ;;
     esac
     [[ ! -L "$target" ]] || fail "Refusing to replace a symlinked target directory: ${target}"
-    find "$target" -mindepth 1 -delete
-    cp -a "${source}/." "$target/"
+    parent="$(dirname "$target")"
+    base="$(basename "$target")"
+    old_dir="${parent}/.${base}.pre-restore.$$"
+    [[ ! -e "$old_dir" ]] || fail "Restore rollback path already exists: ${old_dir}"
+    mv -- "$target" "$old_dir"
+    swapped_targets+=("$target")
+    swapped_old_dirs+=("$old_dir")
+    mv -- "$stage" "$target" || fail "Atomic state swap failed for ${target}."
 }
 
-log "Replacing n8n state from the verified staging area."
-replace_tree "${restore_tmp}/n8n/data" "${PROJECT_DIR}/n8n/data"
-replace_tree "${restore_tmp}/n8n/files" "${PROJECT_DIR}/n8n/files"
+log "Atomically swapping n8n state from the verified staging area."
+swap_tree "${stage_dirs[0]}" "${PROJECT_DIR}/n8n/data"
+swap_tree "${stage_dirs[1]}" "${PROJECT_DIR}/n8n/files"
 if [[ "$with_kuma" == "true" ]]; then
-    log "Replacing Kuma state from the verified staging area."
-    replace_tree "${restore_tmp}/kuma/data" "${PROJECT_DIR}/kuma/data"
+    log "Atomically swapping Kuma state from the verified staging area."
+    swap_tree "${stage_dirs[2]}" "${PROJECT_DIR}/kuma/data"
 fi
 
 image_owner() {
@@ -327,8 +395,14 @@ for _ in $(seq 1 90); do
 done
 [[ "$ready" == "true" ]] || fail "Restored n8n did not become ready. Safety copy: ${safety_dir}"
 
-stopped_services=()
+for old_dir in "${swapped_old_dirs[@]}"; do
+    safe_remove_restore_tree "$old_dir"
+done
 restore_complete=true
+swapped_targets=()
+swapped_old_dirs=()
+stage_dirs=()
+stopped_services=()
 ok "Restore health validation passed. Safety copy retained: ${safety_dir}"
 echo
 if [[ "$mode" == "clone" ]]; then

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 DEFAULT_TIMEZONE="Asia/Tehran"
-DEFAULT_N8N_IMAGE="n8nio/n8n:latest"
-DEFAULT_KUMA_IMAGE="louislam/uptime-kuma:2"
+DEFAULT_N8N_IMAGE="n8nio/n8n:2.40.5"
+DEFAULT_KUMA_IMAGE="louislam/uptime-kuma:2.5.5"
 DEFAULT_NGINX_IMAGE="nginx:1.28.0-alpine"
 DEFAULT_RETENTION_DAYS="14"
 DEFAULT_KUMA_PORT="3001"
@@ -20,6 +20,20 @@ validate_domain() {
         [[ ${#label} -ge 1 && ${#label} -le 63 ]] || return 1
         [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
     done
+}
+
+validate_pinned_image() {
+    local image="$1" tag
+
+    [[ "$image" =~ ^[A-Za-z0-9._/:@-]+$ ]] || return 1
+    if [[ "$image" =~ @sha256:[A-Fa-f0-9]{64}$ ]]; then
+        return 0
+    fi
+
+    tag="${image##*:}"
+    [[ "$tag" != "$image" && "$tag" != *"/"* ]] || return 1
+    [[ "$tag" =~ [0-9]+\.[0-9]+ ]] || return 1
+    [[ "$tag" != "latest" ]]
 }
 
 prompt_with_default() {
@@ -46,8 +60,8 @@ core_prompt() {
 
     while :; do
         N8N_IMAGE="$(prompt_with_default "n8n image" "$DEFAULT_N8N_IMAGE")"
-        [[ "$N8N_IMAGE" =~ ^[A-Za-z0-9._/:@-]+$ ]] && break
-        warn "Image reference contains unsupported characters."
+        validate_pinned_image "$N8N_IMAGE" && break
+        warn "Use an immutable digest or an explicit version tag containing at least major.minor."
     done
 
     while :; do

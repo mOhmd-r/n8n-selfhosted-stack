@@ -24,7 +24,7 @@ done
 [[ -t 0 ]] || fail "install.sh is interactive and requires a terminal. Use bootstrap.sh for non-interactive deployment."
 
 missing=()
-for command_name in docker tar sha256sum sqlite3; do
+for command_name in docker tar sha256sum sqlite3 realpath; do
     command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
 done
 (( ${#missing[@]} == 0 )) || fail "Missing prerequisites: ${missing[*]}. Install them explicitly, then retry."
@@ -46,7 +46,7 @@ while :; do
     choice="${choice:-1}"
     case "$choice" in
         1) OFFSITE_PROVIDER="none"; break ;;
-        2) OFFSITE_PROVIDER="rsync"; command -v rsync >/dev/null 2>&1 || fail "rsync is required."; command -v ssh >/dev/null 2>&1 || fail "ssh is required."; rsync_prompt; break ;;
+        2) OFFSITE_PROVIDER="rsync"; for tool in rsync ssh ssh-keygen stat; do command -v "$tool" >/dev/null 2>&1 || fail "${tool} is required."; done; rsync_prompt; break ;;
         3) OFFSITE_PROVIDER="ceph"; ceph_prompt; break ;;
         *) warn "Choose 1, 2, or 3." ;;
     esac
@@ -81,16 +81,12 @@ echo "  TLS provider       : ${TLS_PROVIDER}"
 if [[ "$TLS_ENABLED" == "true" ]]; then
     echo "  Certificate        : ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}"
 fi
-if [[ "$TLS_PROVIDER" == "cloudflare" ]]; then
-    echo "  TLS helper changes : delegated helper runs sudo apt update/install and creates a root-owned virtualenv"
-elif [[ "$TLS_PROVIDER" == "arvancloud" ]]; then
-    echo "  TLS helper changes : delegated helper runs Certbot and changes DNS challenge records"
-fi
 echo "  Off-site provider  : ${OFFSITE_PROVIDER}"
 echo "  Scheduler          : ${SCHEDULER}"
 if [[ "$OFFSITE_PROVIDER" == "rsync" ]]; then
     echo "  rsync destination  : ${RSYNC_USER}@${RSYNC_HOST}:${RSYNC_PATH} (SSH port ${RSYNC_PORT})"
     echo "  SSH key reference  : ${RSYNC_SSH_KEY}"
+    echo "  Pinned host keys   : ${RSYNC_KNOWN_HOSTS_FILE}"
 elif [[ "$OFFSITE_PROVIDER" == "ceph" ]]; then
     echo "  S3 destination     : s3://${CEPH_S3_BUCKET}/${CEPH_S3_PREFIX}/"
     echo "  S3 endpoint/region : ${CEPH_S3_ENDPOINT} / ${AWS_DEFAULT_REGION}"

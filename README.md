@@ -21,7 +21,7 @@ chmod +x install.sh
 
 `install.sh` asks for the full n8n hostname, timezone, n8n image, local retention, TLS mode, optional off-site target, and optional cron schedule. It shows the complete plan and requires `INSTALL` before writing anything. It never installs system packages.
 
-The core prerequisites are Bash, Docker Engine with the Compose plugin, `tar`, `sha256sum`, and `sqlite3`. A selected TLS helper also needs `git` and its own documented prerequisites. rsync mode needs `rsync` and `ssh`.
+The core prerequisites are Bash, Docker Engine with the Compose plugin, `tar`, `sha256sum`, `sqlite3`, and `realpath`. rsync mode also needs `rsync`, `ssh`, and `ssh-keygen`.
 
 For automation, prepare `.env` and certificate material first, then run the non-interactive engine:
 
@@ -62,19 +62,15 @@ Do not put these directories on a filesystem without reliable POSIX locking. SQL
 
 Certificate issuance is deliberately outside this repository. The installer offers:
 
-1. ArvanCloud — delegates interactively to [ArvanCloud-Certbot](https://github.com/mOhmd-r/ArvanCloud-Certbot).
-2. Cloudflare — delegates interactively to [Cloudflare-Certbot](https://github.com/mOhmd-r/Cloudflare-Certbot).
-3. Existing certificate — asks for the Certbot root and name below `live/`.
-4. Skip — starts Nginx in plain HTTP mode for initial setup.
+1. Existing certificate — asks for the Certbot root and name below `live/`.
+2. Skip — starts Nginx in plain HTTP mode for initial setup.
 
-Provider tokens are never accepted as command-line arguments or stored in this repository. Delegated helpers are cloned to a temporary directory, run interactively, and removed. With TLS enabled, bootstrap requires readable files at:
+Provision certificates separately with a reviewed tool such as [ArvanCloud-Certbot](https://github.com/mOhmd-r/ArvanCloud-Certbot), [Cloudflare-Certbot](https://github.com/mOhmd-r/Cloudflare-Certbot), or your normal ACME process. This installer never clones or executes remote helper code. It validates that the certificate and key resolve inside the selected Certbot `live/` or `archive/` tree, are valid, and have matching public keys. With TLS enabled, bootstrap requires:
 
 ```text
 ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}/fullchain.pem
 ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}/privkey.pem
 ```
-
-The current Cloudflare helper manages its Python prerequisites with `sudo apt` and creates a virtual environment. The installation plan discloses this before confirmation; review the linked helper if those host changes are unsuitable. The wrapper disables terminal echo around its prompts so the helper's API-token input is not displayed.
 
 The Certbot root is mounted read-only in Nginx. Certificate renewal remains the operator's responsibility; renewals may require an Nginx reload.
 
@@ -107,7 +103,7 @@ Off-site setup is optional and only runs when selected in `install.sh`.
 
 ### rsync / SSH
 
-The installer records non-secret connection settings in ignored `.env.rsync`, references an existing SSH key without copying it, tests SSH without changing remote state, and asks before creating a missing remote directory.
+The installer records non-secret connection settings in ignored `.env.rsync`, references an existing SSH key and `known_hosts` file without copying them, requires a pre-pinned host key with strict checking, tests SSH without changing remote state, and asks before creating a missing remote directory. Password and keyboard-interactive authentication, agent forwarding, and SSH forwarding are disabled.
 
 ```bash
 ./push-backup-rsync.sh latest
@@ -118,13 +114,13 @@ The uploader validates the local backup, transfers to a new remote `.partial-*` 
 
 ### Ceph RGW / S3-compatible storage
 
-The installer keeps endpoint/bucket settings in ignored `.env.ceph` and writes credentials to `.secrets/aws/credentials` with directory mode 700 and file mode 600. Bucket access is tested; a missing bucket is created only after a separate confirmation.
+The installer requires an HTTPS endpoint, keeps endpoint/bucket settings in ignored `.env.ceph`, and writes credentials to `.secrets/aws/credentials` with directory mode 700 and file mode 600. Bucket access is tested; a missing bucket is created only after a separate confirmation.
 
 ```bash
 ./push-backup-ceph.sh latest
 ```
 
-The uploader uses a pinned official AWS CLI container, mounts the credentials file read-only, and publishes `VERIFIED` last. It never deletes remote objects. Object-locking, lifecycle retention, versioning, and encryption are policies for the object store and are not configured here.
+The uploader uses a pinned official AWS CLI container, mounts the credentials file read-only, and publishes `VERIFIED` last. It never deletes remote objects. SHA256 detects accidental corruption but does not authenticate a backup against an attacker who can rewrite the data and hashes. Enforce restricted credentials, encryption at rest, versioning or object lock, and independent retention in the object store.
 
 ## Recovery
 
@@ -136,7 +132,7 @@ Always configure the target checkout and make its images available before restor
 ./restore.sh --mode production backups/20260904T031500Z-1234
 ```
 
-After explicit confirmation, the script stops affected services, creates a checksummed `backups/pre-restore-*` safety archive of current n8n and Kuma state, replaces both data sets, derives ownership from the selected images, starts n8n and Kuma, and waits for n8n readiness. Safety archives are never removed automatically.
+After explicit confirmation, the script copies verified content into same-filesystem staging directories, stops affected services, and creates a checksummed `backups/pre-restore-*` safety archive. It then swaps complete directory trees by rename, derives ownership, starts services, and waits for n8n readiness. A failure after the swap stops the restored services, rolls the previous trees back, and returns only previously running services to service. Safety archives are never removed automatically.
 
 ### Clone / test
 
@@ -191,7 +187,7 @@ This is a recoverable single-node design, not high availability or zero downtime
 - Local backups share the host's disk failure domain; configure and test an off-site copy.
 - TLS issuance and renewal are external responsibilities.
 - The scripts verify structure, hashes, and SQLite consistency, but only a rehearsed restore proves the broader recovery procedure.
-- The default n8n `latest` and Kuma `2` tags are moving targets. A pull can therefore introduce an upgrade. Take and verify a backup before pulling, review release notes, and test restore behavior.
+- Default application images use explicit release tags, and bootstrap rejects `latest` and major-only tags. Before changing a tag, take and verify a backup, review release notes, test the upgrade and restore path, and commit the planned version change.
 - The stack does not configure host firewalls, Docker installation, OS patching, DNS, CDN behavior, email, object-store policies, or external monitoring.
 
 See [docs/architecture.md](docs/architecture.md) for the design and trust boundaries.
