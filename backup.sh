@@ -14,6 +14,7 @@ fail() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
 [[ -f .env ]] || fail ".env is missing."
 # shellcheck source=/dev/null
+# shellcheck disable=SC1091
 set -a; source .env; set +a
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "BACKUP_RETENTION_DAYS must be a non-negative integer."

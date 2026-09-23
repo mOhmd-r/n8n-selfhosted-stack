@@ -83,6 +83,7 @@ docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is unavailable."
 [[ -f .env ]] || fail ".env is missing. Configure the target stack before restoring."
 # shellcheck source=/dev/null
+# shellcheck disable=SC1091
 set -a; source .env; set +a
 [[ -n "${N8N_IMAGE:-}" && -n "${KUMA_IMAGE:-}" ]] || fail ".env lacks N8N_IMAGE or KUMA_IMAGE."
 
@@ -150,7 +151,9 @@ cleanup() {
         done
     fi
     for stage in "${stage_dirs[@]}"; do
-        [[ -e "$stage" ]] && safe_remove_restore_tree "$stage" || true
+        if [[ -e "$stage" ]]; then
+            safe_remove_restore_tree "$stage" || true
+        fi
     done
     if [[ "$restore_complete" != "true" && ${#stopped_services[@]} -gt 0 ]]; then
         warn "Attempting to return services to their prior running state."
@@ -185,12 +188,12 @@ n8n_db="${restore_tmp}/n8n/data/database.sqlite"
 kuma_db="${restore_tmp}/kuma/data/kuma.db"
 
 unexpected_node="$(find "${restore_tmp}/n8n" "${restore_tmp}/kuma" ! -type f ! -type d ! -type l -print -quit)"
-[[ -z "$unexpected_node" ]] || fail "Backup contains an unsupported filesystem object: ${unexpected_node#${restore_tmp}/}"
+[[ -z "$unexpected_node" ]] || fail "Backup contains an unsupported filesystem object: ${unexpected_node#"${restore_tmp}"/}"
 while IFS= read -r link; do
     resolved_link="$(realpath -m "$link")"
     case "$resolved_link" in
         "${restore_tmp}/"*) ;;
-        *) fail "Backup contains a symlink escaping the staging area: ${link#${restore_tmp}/}" ;;
+        *) fail "Backup contains a symlink escaping the staging area: ${link#"${restore_tmp}"/}" ;;
     esac
 done < <(find "${restore_tmp}/n8n" "${restore_tmp}/kuma" -type l -print)
 [[ -f "$n8n_db" && ! -L "$n8n_db" ]] || fail "Backup has no regular n8n database.sqlite."

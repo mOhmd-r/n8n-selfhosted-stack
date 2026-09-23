@@ -23,6 +23,7 @@ validate_pinned_image() {
 
 [[ -f .env ]] || fail ".env is missing. Run ./install.sh, or copy .env.example to .env and review it."
 # shellcheck source=/dev/null
+# shellcheck disable=SC1091
 set -a; source .env; set +a
 
 required=(N8N_HOST TIMEZONE N8N_IMAGE KUMA_IMAGE NGINX_IMAGE KUMA_PORT TLS_ENABLED LETSENCRYPT_PATH TLS_CERT_NAME TLS_VOLUME_SOURCE PUBLIC_SCHEME NGINX_TLS_PREFIX NGINX_HTTP_PREFIX BACKUP_RETENTION_DAYS)
@@ -31,7 +32,9 @@ for variable in "${required[@]}"; do
 done
 [[ "$TLS_ENABLED" == "true" || "$TLS_ENABLED" == "false" ]] || fail "TLS_ENABLED must be true or false."
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "BACKUP_RETENTION_DAYS must be a non-negative integer."
-[[ "$KUMA_PORT" =~ ^[0-9]+$ ]] && (( KUMA_PORT >= 1 && KUMA_PORT <= 65535 )) || fail "KUMA_PORT is invalid."
+if [[ ! "$KUMA_PORT" =~ ^[0-9]+$ ]] || (( KUMA_PORT < 1 || KUMA_PORT > 65535 )); then
+    fail "KUMA_PORT is invalid."
+fi
 for image_variable in N8N_IMAGE KUMA_IMAGE NGINX_IMAGE; do
     validate_pinned_image "${!image_variable}" ||
         fail "${image_variable} must use an explicit version tag or sha256 digest; moving tags are rejected."

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# This file is sourced by install.sh; these assignments are consumed there.
+# shellcheck disable=SC2034
+
 validate_cert_name() {
     [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$1" != *..* ]]
 }

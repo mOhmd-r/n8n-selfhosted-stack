@@ -11,8 +11,9 @@ rsync_prompt() {
     RSYNC_KNOWN_HOSTS_FILE="${RSYNC_KNOWN_HOSTS_FILE:-${HOME}/.ssh/known_hosts}"
 
     [[ "$RSYNC_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || fail "Remote host contains unsupported characters."
-    [[ "$RSYNC_PORT" =~ ^[0-9]+$ ]] && (( RSYNC_PORT >= 1 && RSYNC_PORT <= 65535 )) \
-        || fail "SSH port must be between 1 and 65535."
+    if [[ ! "$RSYNC_PORT" =~ ^[0-9]+$ ]] || (( RSYNC_PORT < 1 || RSYNC_PORT > 65535 )); then
+        fail "SSH port must be between 1 and 65535."
+    fi
     [[ "$RSYNC_USER" =~ ^[A-Za-z_][A-Za-z0-9._-]*$ ]] || fail "Remote user is invalid."
     [[ "$RSYNC_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$RSYNC_PATH" != *..* ]] \
         || fail "Remote path must be an absolute path without spaces or '..'."
@@ -47,8 +48,11 @@ rsync_configure() {
     ssh "${ssh_args[@]}" "${RSYNC_USER}@${RSYNC_HOST}" true \
         || fail "SSH connectivity test failed."
 
+    # RSYNC_PATH is validated above and intentionally expanded on this client.
+    # shellcheck disable=SC2029
     if ! ssh "${ssh_args[@]}" "${RSYNC_USER}@${RSYNC_HOST}" "test -d '${RSYNC_PATH}'"; then
         if confirm "Remote directory does not exist. Create ${RSYNC_PATH}?"; then
+            # shellcheck disable=SC2029
             ssh "${ssh_args[@]}" "${RSYNC_USER}@${RSYNC_HOST}" "mkdir -p -- '${RSYNC_PATH}'" \
                 || fail "Could not create the remote directory."
         else
