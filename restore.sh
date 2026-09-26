@@ -400,14 +400,17 @@ for _ in $(seq 1 90); do
 done
 [[ "$ready" == "true" ]] || fail "Restored n8n did not become ready. Safety copy: ${safety_dir}"
 
-for old_dir in "${swapped_old_dirs[@]}"; do
-    safe_remove_restore_tree "$old_dir"
-done
+# The restored state has passed its health gate. Commit it before pruning the
+# rollback trees so a cleanup failure can never replace healthy state with a
+# partially deleted previous tree.
 restore_complete=true
 swapped_targets=()
-swapped_old_dirs=()
 stage_dirs=()
 stopped_services=()
+for old_dir in "${swapped_old_dirs[@]}"; do
+    safe_remove_restore_tree "$old_dir" || warn "Could not remove old restore tree: ${old_dir}"
+done
+swapped_old_dirs=()
 ok "Restore health validation passed. Safety copy retained: ${safety_dir}"
 echo
 if [[ "$mode" == "clone" ]]; then

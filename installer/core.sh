@@ -4,7 +4,7 @@ DEFAULT_TIMEZONE="Asia/Tehran"
 DEFAULT_N8N_IMAGE="n8nio/n8n:2.40.5"
 DEFAULT_KUMA_IMAGE="louislam/uptime-kuma:2.5.5"
 DEFAULT_NGINX_IMAGE="nginx:1.28.0-alpine"
-DEFAULT_RETENTION_DAYS="14"
+DEFAULT_RETENTION_COUNT="3"
 DEFAULT_KUMA_PORT="3001"
 
 validate_domain() {
@@ -32,8 +32,8 @@ validate_pinned_image() {
 
     tag="${image##*:}"
     [[ "$tag" != "$image" && "$tag" != *"/"* ]] || return 1
-    [[ "$tag" =~ [0-9]+\.[0-9]+ ]] || return 1
-    [[ "$tag" != "latest" ]]
+    [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([._-][A-Za-z0-9][A-Za-z0-9._-]*)?$ ]] || return 1
+    [[ "$tag" != *latest* && "$tag" != *stable* && "$tag" != *nightly* && "$tag" != *edge* ]]
 }
 
 prompt_with_default() {
@@ -61,13 +61,13 @@ core_prompt() {
     while :; do
         N8N_IMAGE="$(prompt_with_default "n8n image" "$DEFAULT_N8N_IMAGE")"
         validate_pinned_image "$N8N_IMAGE" && break
-        warn "Use an immutable digest or an explicit version tag containing at least major.minor."
+        warn "Use an immutable digest or an explicit major.minor.patch version tag."
     done
 
     while :; do
-        BACKUP_RETENTION_DAYS="$(prompt_with_default "Local backup retention in days" "$DEFAULT_RETENTION_DAYS")"
-        [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] && break
-        warn "Retention must be a non-negative whole number."
+        BACKUP_RETENTION_COUNT="$(prompt_with_default "Maximum verified local backups" "$DEFAULT_RETENTION_COUNT")"
+        [[ "$BACKUP_RETENTION_COUNT" =~ ^[1-9][0-9]*$ ]] && break
+        warn "Retention count must be a positive whole number."
     done
 
     KUMA_IMAGE="$DEFAULT_KUMA_IMAGE"
@@ -95,8 +95,9 @@ TLS_VOLUME_SOURCE=${TLS_VOLUME_SOURCE}
 PUBLIC_SCHEME=${PUBLIC_SCHEME}
 NGINX_TLS_PREFIX="${NGINX_TLS_PREFIX}"
 NGINX_HTTP_PREFIX="${NGINX_HTTP_PREFIX}"
+NGINX_BIND_IP=${NGINX_BIND_IP}
 
-BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS}
+BACKUP_RETENTION_COUNT=${BACKUP_RETENTION_COUNT}
 EOF
 
     chmod 600 "$env_tmp"

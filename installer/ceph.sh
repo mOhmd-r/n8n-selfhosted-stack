@@ -48,7 +48,7 @@ ceph_configure() {
     mv -f "$credentials_tmp" "${PROJECT_DIR}/.secrets/aws/credentials"
     unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 
-    log "Pulling the pinned official AWS CLI image."
+    log "Pulling the explicit-version official AWS CLI image."
     docker pull "$AWS_CLI_IMAGE"
 
     error_file="$(mktemp)"

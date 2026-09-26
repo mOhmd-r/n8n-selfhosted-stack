@@ -19,12 +19,19 @@ for accepted in \
     }
 done
 
-for rejected in n8nio/n8n:latest louislam/uptime-kuma:2 nginx:stable untagged; do
+for rejected in n8nio/n8n:latest n8nio/n8n:2.0-latest louislam/uptime-kuma:2 nginx:stable untagged; do
     if validate_pinned_image "$rejected"; then
         printf 'Expected moving or untagged image to fail: %s\n' "$rejected" >&2
         exit 1
     fi
 done
+
+rg -q 'BACKUP_RETENTION_COUNT=3' .env.example
+rg -q '\$\{NGINX_BIND_IP\}:80:80' docker-compose.yaml
+if rg -q 'BACKUP_RETENTION_DAYS' backup.sh installer .env.example; then
+    printf 'Legacy day-based local retention is still active.\n' >&2
+    exit 1
+fi
 
 if rg -n 'git clone|curl.+\|.+(sh|bash)|wget.+\|.+(sh|bash)' install.sh installer bootstrap.sh; then
     printf 'Installer path must not fetch and execute remote helpers.\n' >&2

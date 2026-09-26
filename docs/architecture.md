@@ -104,7 +104,7 @@ The manifest records source host/time, configured n8n and Kuma images, locally a
 Local backups share the production disk's failure domain. Two optional uploaders move only verified backup sets:
 
 - rsync requires an operator-pinned host key, disables password/interactive authentication and forwarding, transfers into a unique remote partial directory, validates hashes on the remote host, and renames the directory atomically. It does not merge with an existing target, use `--delete`, or enforce remote retention.
-- Ceph/S3 requires HTTPS and uses a pinned official AWS CLI container plus a read-only mounted credentials file. Archive, manifest, and hashes upload first; `VERIFIED` uploads last. It never deletes objects or buckets.
+- Ceph/S3 requires HTTPS and uses an explicit-version official AWS CLI container plus a read-only mounted credentials file. Use a digest when immutable image identity is required. Archive, manifest, and hashes upload first; `VERIFIED` uploads last. It never deletes objects or buckets.
 
 Remote lifecycle, immutability, encryption, replication, capacity, and credential rotation belong to the remote system. Operators must monitor and test that boundary.
 

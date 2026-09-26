@@ -18,8 +18,8 @@ set -a
 # shellcheck disable=SC1091
 source .env
 set +a
-BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
-[[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "BACKUP_RETENTION_DAYS must be a non-negative integer."
+BACKUP_RETENTION_COUNT="${BACKUP_RETENTION_COUNT:-3}"
+[[ "$BACKUP_RETENTION_COUNT" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_RETENTION_COUNT must be a positive integer."
 [[ -n "${N8N_IMAGE:-}" && -n "${KUMA_IMAGE:-}" ]] || fail ".env lacks N8N_IMAGE or KUMA_IMAGE."
 
 for command_name in docker tar sha256sum sqlite3; do
@@ -168,15 +168,18 @@ mv "$partial_dir" "$final_dir"
 backup_complete=true
 ok "Verified backup created: ${final_dir}"
 
-log "Applying retention only to old, completed backup directories."
-while IFS= read -r candidate; do
-    [[ "$candidate" != "$final_dir" && -f "${candidate}/VERIFIED" ]] || continue
-    case "$candidate" in
-        "${BACKUP_ROOT}"/20*T*Z-*)
-            log "Removing expired verified backup: $(basename "$candidate")"
-            rm -rf -- "$candidate"
-            ;;
-    esac
-done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z-*' -mtime "+${BACKUP_RETENTION_DAYS}" -print)
+log "Keeping at most ${BACKUP_RETENTION_COUNT} completed local backups."
+mapfile -d '' -t verified_backups < <(
+    find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z-*' -print0 |
+        sort -z -r |
+        while IFS= read -r -d '' candidate; do
+            [[ -f "${candidate}/VERIFIED" ]] && printf '%s\0' "$candidate"
+        done
+)
+for (( index=BACKUP_RETENTION_COUNT; index<${#verified_backups[@]}; index++ )); do
+    candidate="${verified_backups[$index]}"
+    log "Removing excess verified backup: $(basename "$candidate")"
+    rm -rf -- "$candidate"
+done
 
 printf 'BACKUP_PATH=%s\n' "$final_dir"
