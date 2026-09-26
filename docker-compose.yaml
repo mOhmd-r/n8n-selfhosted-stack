@@ -54,8 +54,8 @@ services:
       NGINX_TLS_PREFIX: ${NGINX_TLS_PREFIX}
       NGINX_HTTP_PREFIX: ${NGINX_HTTP_PREFIX}
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_BIND_IP}:80:80"
+      - "${NGINX_BIND_IP}:443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/templates:ro
       - ${TLS_VOLUME_SOURCE}:/etc/letsencrypt:ro

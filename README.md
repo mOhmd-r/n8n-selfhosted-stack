@@ -19,7 +19,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-`install.sh` asks for the full n8n hostname, timezone, n8n image, local retention, TLS mode, optional off-site target, and optional cron schedule. It shows the complete plan and requires `INSTALL` before writing anything. It never installs system packages.
+`install.sh` asks for the full n8n hostname, timezone, n8n image, local backup count, TLS mode, optional off-site target, and optional cron schedule. It shows the complete plan and requires `INSTALL` before writing anything. It never installs system packages.
 
 The core prerequisites are Bash, Docker Engine with the Compose plugin, `tar`, `sha256sum`, `sqlite3`, and `realpath`. rsync mode also needs `rsync`, `ssh`, and `ssh-keygen`.
 
@@ -63,7 +63,7 @@ Do not put these directories on a filesystem without reliable POSIX locking. SQL
 Certificate issuance is deliberately outside this repository. The installer offers:
 
 1. Existing certificate — asks for the Certbot root and name below `live/`.
-2. Skip — starts Nginx in plain HTTP mode for initial setup.
+2. Skip — starts Nginx in plain HTTP mode bound only to `127.0.0.1` for initial setup.
 
 Provision certificates separately with a reviewed tool such as [ArvanCloud-Certbot](https://github.com/mOhmd-r/ArvanCloud-Certbot), [Cloudflare-Certbot](https://github.com/mOhmd-r/Cloudflare-Certbot), or your normal ACME process. This installer never clones or executes remote helper code. It validates that the certificate and key resolve inside the selected Certbot `live/` or `archive/` tree, are valid, and have matching public keys. With TLS enabled, bootstrap requires:
 
@@ -72,7 +72,13 @@ ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}/fullchain.pem
 ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}/privkey.pem
 ```
 
-The Certbot root is mounted read-only in Nginx. Certificate renewal remains the operator's responsibility; renewals may require an Nginx reload.
+The Certbot root is mounted read-only in Nginx. Certificate renewal remains the operator's responsibility. Nginx must be reloaded after a successful renewal so it reads the new certificate. From the repository directory, use a reviewed Certbot deploy hook that runs:
+
+```bash
+docker compose exec -T nginx nginx -s reload
+```
+
+Do not expose the no-TLS mode through a public reverse proxy or port-forward. Enable TLS first, then set the generated public bind configuration through the installer.
 
 ## Backup
 
@@ -93,7 +99,7 @@ Every candidate backup is built under a hidden partial directory. Before it beco
 - records timestamp, hostname, configured images, available image IDs/digests, integrity results, and counts in `manifest.txt`;
 - generates and immediately checks `SHA256SUMS`.
 
-Only then does it create `VERIFIED` and atomically rename the directory. Restore and upload scripts refuse directories without `VERIFIED`, `manifest.txt`, `SHA256SUMS`, and valid hashes. Retention applies only to completed timestamped backup directories; failed partial backups and pre-restore safety copies are not deleted automatically.
+Only then does it create `VERIFIED` and atomically rename the directory. Restore and upload scripts refuse directories without `VERIFIED`, `manifest.txt`, `SHA256SUMS`, and valid hashes. Local retention keeps only the newest `BACKUP_RETENTION_COUNT` verified timestamped backups (default: 3); failed partial backups and pre-restore safety copies are not deleted automatically.
 
 Backups contain credentials, n8n encryption material, workflow data, and possibly sensitive files. Treat them as secrets.
 
@@ -103,7 +109,7 @@ Off-site setup is optional and only runs when selected in `install.sh`.
 
 ### rsync / SSH
 
-The installer records non-secret connection settings in ignored `.env.rsync`, references an existing SSH key and `known_hosts` file without copying them, requires a pre-pinned host key with strict checking, tests SSH without changing remote state, and asks before creating a missing remote directory. Password and keyboard-interactive authentication, agent forwarding, and SSH forwarding are disabled.
+The installer records non-secret connection settings in ignored `.env.rsync`, references an existing SSH key and `known_hosts` file without copying them, requires a pre-pinned host key with strict checking, tests SSH without changing remote state, and asks before creating a missing remote directory. Password and keyboard-interactive authentication, agent forwarding, and SSH forwarding are disabled. `.env`, `.env.rsync`, and `.env.ceph` are sourced as trusted shell configuration; never copy them from an untrusted source and keep them owner-only.
 
 ```bash
 ./push-backup-rsync.sh latest
@@ -120,7 +126,7 @@ The installer requires an HTTPS endpoint, keeps endpoint/bucket settings in igno
 ./push-backup-ceph.sh latest
 ```
 
-The uploader uses a pinned official AWS CLI container, mounts the credentials file read-only, and publishes `VERIFIED` last. It never deletes remote objects. SHA256 detects accidental corruption but does not authenticate a backup against an attacker who can rewrite the data and hashes. Enforce restricted credentials, encryption at rest, versioning or object lock, and independent retention in the object store.
+The uploader uses an explicit-version official AWS CLI container, mounts the credentials file read-only, and publishes `VERIFIED` last. A registry tag is not immutable; pin the configured image by digest when that guarantee is required. The uploader never deletes remote objects. SHA256 detects accidental corruption but does not authenticate a backup against an attacker who can rewrite the data and hashes. Enforce restricted credentials, encryption at rest, versioning or object lock, and independent retention in the object store.
 
 ## Recovery
 
@@ -187,7 +193,7 @@ This is a recoverable single-node design, not high availability or zero downtime
 - Local backups share the host's disk failure domain; configure and test an off-site copy.
 - TLS issuance and renewal are external responsibilities.
 - The scripts verify structure, hashes, and SQLite consistency, but only a rehearsed restore proves the broader recovery procedure.
-- Default application images use explicit release tags, and bootstrap rejects `latest` and major-only tags. Before changing a tag, take and verify a backup, review release notes, test the upgrade and restore path, and commit the planned version change.
+- Default application images use explicit major/minor/patch release tags, and bootstrap rejects moving names such as `latest`, `stable`, `nightly`, and `edge`. Tags can still be moved by a registry; use `@sha256:` digests when immutable image identity is required. Before changing an image, take and verify a backup, review release notes, test the upgrade and restore path, and commit the planned change.
 - The stack does not configure host firewalls, Docker installation, OS patching, DNS, CDN behavior, email, object-store policies, or external monitoring.
 
 See [docs/architecture.md](docs/architecture.md) for the design and trust boundaries.

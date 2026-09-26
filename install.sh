@@ -76,7 +76,7 @@ echo "  Timezone           : ${TIMEZONE}"
 echo "  n8n image          : ${N8N_IMAGE}"
 echo "  Kuma image         : ${KUMA_IMAGE}"
 echo "  Kuma UI            : 127.0.0.1:${KUMA_PORT}"
-echo "  Local retention    : ${BACKUP_RETENTION_DAYS} days"
+echo "  Local backups      : keep newest ${BACKUP_RETENTION_COUNT}"
 echo "  TLS provider       : ${TLS_PROVIDER}"
 if [[ "$TLS_ENABLED" == "true" ]]; then
     echo "  Certificate        : ${LETSENCRYPT_PATH}/live/${TLS_CERT_NAME}"

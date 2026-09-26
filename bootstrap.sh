@@ -28,12 +28,16 @@ set -a
 source .env
 set +a
 
-required=(N8N_HOST TIMEZONE N8N_IMAGE KUMA_IMAGE NGINX_IMAGE KUMA_PORT TLS_ENABLED LETSENCRYPT_PATH TLS_CERT_NAME TLS_VOLUME_SOURCE PUBLIC_SCHEME NGINX_TLS_PREFIX NGINX_HTTP_PREFIX BACKUP_RETENTION_DAYS)
+required=(N8N_HOST TIMEZONE N8N_IMAGE KUMA_IMAGE NGINX_IMAGE KUMA_PORT TLS_ENABLED LETSENCRYPT_PATH TLS_CERT_NAME TLS_VOLUME_SOURCE PUBLIC_SCHEME NGINX_TLS_PREFIX NGINX_HTTP_PREFIX NGINX_BIND_IP BACKUP_RETENTION_COUNT)
 for variable in "${required[@]}"; do
     [[ -n "${!variable+x}" ]] || fail "Required .env variable is missing: ${variable}"
 done
 [[ "$TLS_ENABLED" == "true" || "$TLS_ENABLED" == "false" ]] || fail "TLS_ENABLED must be true or false."
-[[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || fail "BACKUP_RETENTION_DAYS must be a non-negative integer."
+[[ "$BACKUP_RETENTION_COUNT" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_RETENTION_COUNT must be a positive integer."
+[[ "$NGINX_BIND_IP" == "0.0.0.0" || "$NGINX_BIND_IP" == "127.0.0.1" ]] || fail "NGINX_BIND_IP must be 0.0.0.0 or 127.0.0.1."
+if [[ "$TLS_ENABLED" == "false" && "$NGINX_BIND_IP" != "127.0.0.1" ]]; then
+    fail "Plain HTTP mode must bind to 127.0.0.1. Enable TLS before exposing Nginx publicly."
+fi
 if [[ ! "$KUMA_PORT" =~ ^[0-9]+$ ]] || (( KUMA_PORT < 1 || KUMA_PORT > 65535 )); then
     fail "KUMA_PORT is invalid."
 fi
@@ -83,7 +87,7 @@ if [[ "$TLS_ENABLED" == "true" ]]; then
     can_read_file "${CERT_DIR}/privkey.pem" || fail "TLS private key is unreadable or resolves outside the selected Certbot tree: ${CERT_DIR}/privkey.pem"
     ok "TLS certificate files are readable."
 else
-    log "TLS is disabled; Nginx will serve plain HTTP."
+    log "TLS is disabled; Nginx will serve plain HTTP on 127.0.0.1 only."
 fi
 
 log "Creating relative persistent directories."

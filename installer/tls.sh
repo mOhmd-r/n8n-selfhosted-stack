@@ -50,6 +50,7 @@ EOF
         PUBLIC_SCHEME="https"
         NGINX_TLS_PREFIX=""
         NGINX_HTTP_PREFIX="#"
+        NGINX_BIND_IP="0.0.0.0"
     else
         LETSENCRYPT_PATH="/etc/letsencrypt"
         TLS_CERT_NAME="$N8N_HOST"
@@ -58,6 +59,7 @@ EOF
         PUBLIC_SCHEME="http"
         NGINX_TLS_PREFIX="#"
         NGINX_HTTP_PREFIX=""
+        NGINX_BIND_IP="127.0.0.1"
     fi
 }
 
@@ -129,7 +131,7 @@ tls_configure() {
             tls_validate_certificate
             ;;
         skip)
-            warn "TLS is disabled. Nginx will serve HTTP until .env is updated with valid certificate settings."
+            warn "TLS is disabled. Nginx HTTP will bind only to 127.0.0.1 until valid certificate settings are configured."
             ;;
         *)
             fail "Unknown TLS provider state: ${TLS_PROVIDER:-unset}"
